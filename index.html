@@ -74,7 +74,9 @@ label.tg input[type=text]{width:80px;background:var(--in);color:var(--tx);border
  </form>
 </div>
 <script>
-const TABS=[["pf","Portfolio"],["all","Trade log"],["sc","Scalper"],["rs","RSI(2)"],["gi","Gold inside-day"],["ov","News & Cover"],["cal","N&C calendar"],["ev","N&C event"],["log","N&C trades"],["live","N&C live charts"],["shadow","N&C shadow"],["set","N&C settings"]];
+const TABS=[["pf","Portfolio"],["all","Trade log"],["sc","Scalper"],["rs","RSI(2)"],["gi","Gold inside-day"],["ov","News & Cover"]];
+const NCSUB=[["ov","Overview"],["cal","Calendar"],["ev","Event"],["log","Trades"],["live","Live charts"],["shadow","Shadow"],["set","Settings"]];
+const isNC=k=>NCSUB.some(([x])=>x===k);
 let S=null, tab=location.hash.slice(1)||"pf", selRel=null, openTrade=null, liveOnlyOpen=false, calOpen={m:true,w:true,d:true}, snapCache={};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -89,7 +91,8 @@ const num=(v,d=2)=>v===""||v==null||isNaN(+v)?"-":(+v).toFixed(d);
 async function cmd(c,arg="",ea="NC"){ const nm={NC:"News & Cover",SC:"Burst Scalper",RS:"RSI(2)",GI:"Gold inside-day"}[ea];
   if(c==="CLOSE_ALL"&&!confirm("Close every "+nm+" position"+(ea==="NC"?" and cancel pending covers":"")+"?")) return;
   const {error}=await SB.from("term_commands").insert({ea,cmd:c,arg:String(arg||"")}); if(error) alert("Command failed: "+error.message); setTimeout(load,2500); }
-function navDraw(){ $("#nav").innerHTML=TABS.map(([k,n])=>`<button class="${k===tab?"on":""}" onclick="go('${k}')">${n}</button>`).join(""); }
+function navDraw(){ $("#nav").innerHTML=TABS.map(([k,n])=>`<button class="${(k===tab||(k==="ov"&&isNC(tab)))?"on":""}" onclick="go('${k}')">${n}</button>`).join(""); }
+function ncSub(){ return `<nav aria-label="News &amp; Cover sections" style="margin:0 0 14px;padding:4px;border:1px solid var(--line);border-radius:8px;flex:none">${NCSUB.map(([k,n])=>`<button class="${k===tab?"on":""}" onclick="go('${k}')">${n}</button>`).join("")}</nav>`; }
 function go(k){ tab=k; location.hash=k; navDraw(); draw(); }
 // ---------- candlestick SVG
 function candles(rows,opt){ opt=opt||{}; const W=opt.W||600,H=opt.H||230; if(!rows||!rows.length) return `<div class="empty">No candle data yet.</div>`;
@@ -341,7 +344,7 @@ function banner(){ if(["pf","sc","rs","gi"].includes(tab)) return ""; const a=S.
 function draw(){ if(!S) return; const st=S.status||{}; $("#k-eq").textContent=st.equity?(+st.equity).toLocaleString(undefined,{maximumFractionDigits:0}):"-"; $("#k-dd").textContent=st.dd_day!=null?num(st.dd_day)+"%":"-";
   const live=S.status_age!=null&&S.status_age<30; $("#k-st").innerHTML=`<span class="dot" style="background:${live?(st.paused?"#F2C94C":"#2EC4A6"):"#FF8A4C"}"></span>${live?(st.paused?"Paused":"EA live"):"EA offline"}`;
   const v={pf:vPortfolio,all:vAll,sc:vScalper,rs:vRSI,gi:vGI,ov:vOverview,cal:vCal,ev:vEvent,log:vLog,live:vLive,shadow:vShadow,set:vSettings}[tab]||vOverview;
-  const y=scrollY; const ae=document.activeElement; if(ae&&ae.tagName==="INPUT"&&ae.type==="text") return; $("#app").innerHTML=v(); scrollTo(0,y); }
+  const y=scrollY; const ae=document.activeElement; if(ae&&ae.tagName==="INPUT"&&ae.type==="text") return; $("#app").innerHTML=(isNC(tab)?ncSub():"")+v(); scrollTo(0,y); }
 
 
 // ===================== charts for every system (v4b) =====================
