@@ -81,7 +81,8 @@ label.tg input[type=text]{width:80px;background:var(--in);color:var(--tx);border
  </form>
 </div>
 <script>
-const TABS=[["pf","Portfolio"],["all","Trade log"],["sc","Scalper"],["rs","RSI(2)"],["gi","Gold inside-day"],["ov","News & Cover"]];
+const TABS=[["pf","Portfolio","pf"],["all","Trade log","all"],["scal","Scalping","sc"],["day","Day trading","gp"],["swing","Swing","rs"]];
+const GROUPS={scal:[["sc","Burst Scalper"]],day:[["gp","Gap fade"],["ov","News & Cover"]],swing:[["rs","RSI(2)"],["gi","Gold inside-day"]]};
 const NCSUB=[["ov","Overview"],["cal","Calendar"],["ev","Event"],["log","Trades"],["live","Live charts"],["shadow","Shadow"],["set","Settings"]];
 const isNC=k=>NCSUB.some(([x])=>x===k);
 let S=null, tab=location.hash.slice(1)||"pf", selRel=null, openTrade=null, liveOnlyOpen=false, calOpen={m:true,w:true,d:true}, snapCache={};
@@ -95,10 +96,13 @@ const fmt=(d,o)=>d?d.toLocaleString(undefined,o||{weekday:"short",day:"2-digit",
 const hm=d=>d?d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}):"";
 const nyt=d=>d?d.toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}):"";
 const num=(v,d=2)=>v===""||v==null||isNaN(+v)?"-":(+v).toFixed(d);
-async function cmd(c,arg="",ea="NC"){ const nm={NC:"News & Cover",SC:"Burst Scalper",RS:"RSI(2)",GI:"Gold inside-day"}[ea];
+async function cmd(c,arg="",ea="NC"){ const nm={NC:"News & Cover",SC:"Burst Scalper",RS:"RSI(2)",GI:"Gold inside-day",GP:"Gap fade",AG:"Account guard"}[ea];
   if(c==="CLOSE_ALL"&&!confirm("Close every "+nm+" position"+(ea==="NC"?" and cancel pending covers":"")+"?")) return;
   const {error}=await SB.from("term_commands").insert({ea,cmd:c,arg:String(arg||"")}); if(error) alert("Command failed: "+error.message); setTimeout(load,2500); }
-function navDraw(){ $("#nav").innerHTML=TABS.map(([k,n])=>`<button class="${(k===tab||(k==="ov"&&isNC(tab)))?"on":""}" onclick="go('${k}')">${n}</button>`).join(""); }
+function groupOf(k){ if(k==="pf"||k==="all") return k; if(isNC(k)) return "day"; for(const g in GROUPS) if(GROUPS[g].some(([x])=>x===k)) return g; return "pf"; }
+function navDraw(){ const g=groupOf(tab); $("#nav").innerHTML=TABS.map(([k,n,first])=>`<button class="${k===g?"on":""}" onclick="go('${first}')">${n}</button>`).join(""); }
+function groupSub(){ const g=GROUPS[groupOf(tab)]; if(!g||g.length<2) return "";
+  return `<nav aria-label="Strategies" style="margin:0 0 10px;display:flex;flex-wrap:wrap;gap:6px;flex:none">${g.map(([k,n])=>{ const on=k===tab||(k==="ov"&&isNC(tab)); return `<button class="btn ${on?"pri":""}" style="padding:8px 14px" onclick="go('${k}')">${n}</button>`; }).join("")}</nav>`; }
 function ncSub(){ return `<nav aria-label="News &amp; Cover sections" style="margin:0 0 14px;padding:4px;border:1px solid var(--line);border-radius:8px;flex:none">${NCSUB.map(([k,n])=>`<button class="${k===tab?"on":""}" onclick="go('${k}')">${n}</button>`).join("")}</nav>`; }
 function go(k){ tab=k; location.hash=k; navDraw(); draw(); }
 // ---------- candlestick SVG
@@ -137,6 +141,8 @@ function vOverview(){ const st=S.status||{}, nx=upcomingNext()[0], tg=tradeGroup
   const cd=nx?Math.max(0,nx.t-Date.now()):0, cds=nx?`${Math.floor(cd/864e5)}d ${String(Math.floor(cd%864e5/36e5)).padStart(2,"0")}:${String(Math.floor(cd%36e5/6e4)).padStart(2,"0")}`:"-";
   const wk=[]; const base=new Date(); base.setHours(0,0,0,0); const evs=allEvents(); for(let i=0;i<5;i++){ const d=new Date(base.getTime()+i*864e5); wk.push({d,evs:evs.filter(e=>e.t.toDateString()===d.toDateString())}); }
   return `${banner()}
+  ${condNC()}
+  ${scoreCard(tradeGroups().filter(t=>t.exit).map(t=>({R:t.R,t:srvDate(t.exit.time_server)})),BT.NC,"Scorecard · live trades")}
   <section class="card" style="display:flex;flex-wrap:wrap;gap:24px;align-items:center">
    <div style="flex:1 1 300px"><div class="lbl">Next release</div><div style="font-size:24px;font-weight:700;margin-top:6px">${nx?esc(nx.currency+" "+nx.release):"Nothing scheduled this week"}</div>
    <div class="muted" style="margin-top:4px">${nx?fmt(nx.t)+" · "+nyt(nx.t)+" New York":"The feed loads Sunday for the coming week"}</div></div>
@@ -251,12 +257,15 @@ function vPortfolio(){
   (scs.trades||[]).forEach(t=>rows.push(["Scalper · "+t.module,t.symbol,t.dir,t.mode,sgn(t.r_now,2,"R")]));
   if(rss.position) rows.push(["RSI(2)",rss.symbol,"long","live",sgn(rss.position.profit,0," $")]);
   const gi=S.gi||{}, gis=gi.status||{}; if(gis.position) rows.push(["Gold inside-day",gis.symbol,gis.position.dir,"live",sgn(gis.position.profit,0," $")]);
+  const gp=S.gp||{}, gps=gp.status||{}, gpT=gpPairs(); (gps.positions||[]).forEach(p=>rows.push(["Gap fade · "+(p.leg==="A"?"target half":"runner"),p.symbol,p.dir,"live",sgn(p.profit,0," $")]));
   return `<h1>Portfolio</h1>
+  ${vGuard()}
   <div class="row">
    ${card("News & Cover",ncLive,`<div class="lbl" style="margin-top:12px">Equity</div><div class="big">${nc.equity?(+nc.equity).toLocaleString(undefined,{maximumFractionDigits:0}):"-"}</div><div class="muted" style="margin-top:6px">Day DD ${num(nc.dd_day)}% · ${(nc.positions||[]).length} open</div>`,"ov")}
    ${card("Burst Scalper",sc,`<div class="lbl" style="margin-top:12px">Live today</div><div class="big">${sgn(scTodayR,2,"R")}</div><div class="muted" style="margin-top:6px">Day P&L ${sgn(scs.day_pnl,0," $")} · DD ${num(scs.dd_day)}% day / ${num(scs.dd_total)}% peak · ${(scs.trades||[]).filter(t=>t.mode==="live").length} live open</div>`,"sc")}
    ${card("RSI(2) swing",rs,`<div class="lbl" style="margin-top:12px">${rss.position?"In a trade":"Waiting for a dip"}</div><div class="big">RSI ${num(rss.rsi2,1)}</div><div class="muted" style="margin-top:6px">${rss.symbol||"US500"} · ${rsT.length} trades · closed P&L ${sgn(rsTot,0," $")}</div>`,"rs")}
    ${card("Gold inside-day",gi,`<div class="lbl" style="margin-top:12px">${gis.position?"In a trade":((gis.pending||[]).length?"Orders waiting":"Waiting for an inside day")}</div><div class="big">${sgn((gi.trades||[]).reduce((a,t)=>a+(+t.R||0),0),2,"R")}</div><div class="muted" style="margin-top:6px">${gis.symbol||"XAUUSD"} · ${(gi.trades||[]).length} trades · longs ${gis.longs===false?"off":"on"} · shorts ${gis.shorts?"on":"off"}</div>`,"gi")}
+   ${card("Gap fade",gp,`<div class="lbl" style="margin-top:12px">${(gps.positions||[]).length?"In a trade":"Waits for the 9:30 gap"}</div><div class="big">${sgn(gpT.reduce((a,t)=>a+(t.R||0),0),2,"R")}</div><div class="muted" style="margin-top:6px">NAS100 · US500 · US30 · ${gpT.length} trades · longs ${gps.longs===false?"off":"on"} · shorts ${gps.shorts===false?"off":"on"}</div>`,"gp")}
   </div>
   <section class="card"><h2>Open trades, all strategies</h2>${rows.length?`<div class="scroll"><table><tr><th>Strategy</th><th>Symbol</th><th>Dir</th><th>Mode</th><th>Now</th></tr>${rows.map(r=>`<tr><td>${esc(r[0])}</td><td class="mono">${esc(r[1])}</td><td>${esc(r[2])}</td><td class="muted">${esc(r[3])}</td><td class="mono">${r[4]}</td></tr>`).join("")}</table></div>`:`<div class="empty">Nothing open right now.</div>`}</section>`;
 }
@@ -288,6 +297,8 @@ function vScalper(){
   <div class="row"><section class="card side"><div class="lbl">Day P&L</div><div class="big">${sgn(st.day_pnl,0," $")}</div><div class="muted">since start ${sgn(st.cum_pnl,0," $")}</div></section>
    <section class="card side"><div class="lbl">Daily loss used</div><div class="big">${num(st.dd_day)}%</div><div class="meter" style="margin-top:8px"><span style="width:${Math.min(100,(+st.dd_day||0)/(+set.DD_DAY||5)*100)}%;background:#F2C94C"></span></div><div class="muted" style="margin-top:6px">limit ${num(set.DD_DAY,1)}%</div></section>
    <section class="card side"><div class="lbl">Down from peak</div><div class="big">${num(st.dd_total)}%</div><div class="meter" style="margin-top:8px"><span style="width:${Math.min(100,(+st.dd_total||0)/(+set.DD_TOTAL||25)*100)}%;background:#F2C94C"></span></div><div class="muted" style="margin-top:6px">limit ${num(set.DD_TOTAL,1)}% ${st.block?"· <b>"+esc(st.block)+"</b>":""}</div></section></div>
+  ${condSC(sc)}
+  ${scoreCard((sc.trades||[]).filter(t=>t.mode==="live").map(t=>({R:+t.R,t:srvDate(t.close_server)})),null,"Scorecard · live trades")}
   <div class="row">${SC_MODS.map(modCard).join("")}</div>
   <section class="card"><h2>Open trades</h2>${open.length?`<div class="scroll"><table><tr><th>Module</th><th>Symbol</th><th>Mode</th><th>Dir</th><th>Entry</th><th>Stop / trail</th><th>Partial</th><th>R now</th><th>Opened</th><th></th></tr>${open.map(t=>{ const id=scId(t.module,t.symbol,t.opened); return `<tr style="cursor:pointer" onclick="scToggle('${esc(id)}')"><td class="mono">${esc(t.module)}</td><td class="mono">${esc(t.symbol)}</td><td class="muted">${esc(t.mode)}</td><td>${esc(t.dir)}</td><td class="mono">${esc(t.entry)}</td><td class="mono">${esc(t.trail)}</td><td>${t.partial?"yes":"no"}</td><td class="mono">${sgn(t.r_now,2,"R")}</td><td class="mono muted">${esc(t.opened)}</td><td>${t.mode==="live"&&t.ticket&&t.ticket!=="0"?`<button class="btn warn" style="padding:6px 10px;min-height:32px" onclick="event.stopPropagation();if(confirm('Close this trade?'))cmd('CLOSE','${esc(t.ticket)}','SC')">Close</button>`:""}</td></tr>`+(scSel===id?`<tr><td colspan="10">${scChart(t,false)}</td></tr>`:""); }).join("")}</table></div><div class="muted" style="font-size:12px;margin-top:6px">Tap a trade to see its chart.</div>`:`<div class="empty">Nothing open.</div>`}</section>
   <div class="row"><section class="card grow"><h2>Trade log · closed <span class="muted" style="font-size:12px;font-weight:400">· tap a trade for its chart</span></h2>${tr.length?`<div class="scroll"><table><tr><th>Closed</th><th>Module</th><th>Symbol</th><th>Mode</th><th>Dir</th><th>R</th><th>Partial</th><th>Why</th></tr>${tr.map(t=>{ const id="c_"+scId(t.module,t.symbol,t.open_server); return `<tr style="cursor:pointer" onclick="scToggle('${esc(id)}')"><td class="mono muted">${esc(t.close_server)}</td><td class="mono">${esc(t.module)}</td><td class="mono">${esc(t.symbol)}</td><td class="muted">${esc(t.mode)}</td><td>${esc(t.dir)}</td><td class="mono">${sgn(t.R,2)}</td><td>${esc(t.partial)}</td><td class="muted">${esc(t.reason)}</td></tr>`+(scSel===id?`<tr><td colspan="8">${scChart(t,true)}</td></tr>`:""); }).join("")}</table></div>`:`<div class="empty">No closed trades yet.</div>`}</section>
@@ -313,6 +324,8 @@ function vGI(){
    <section class="card side"><div class="lbl">Position</div>${p?`<div class="big">${sgn(p.profit,0," $")}</div><div class="muted" style="margin-top:6px">${esc(p.dir)} ${num(p.lots)} lots @ ${esc(p.entry)} · trailing stop ${esc(p.sl)} · since ${esc(p.opened)}</div>`:`<div class="big muted">Flat</div>`}</section>
    <section class="card side"><div class="lbl">Closed trades</div><div class="big">${sgn(totR,2,"R")}</div><div class="muted" style="margin-top:6px">${tr.length} trades · ${tr.length?Math.round(100*wins/tr.length):0}% win · DD ${num(st.dd_total)}% from peak</div></section>
   </div>
+  ${condGI(st)}
+  ${scoreCard((g.trades||[]).map(t=>({R:+t.R,profit:t.profit,t:srvDate(t.close_server)})),BT.GI)}
   ${p?`<section class="card"><h2>Open trade</h2>${swChart("GI_",{...p,dir:p.dir||"long"},false)}</section>`:""}
   <section class="card"><h2>Trade log <span class="muted" style="font-size:12px;font-weight:400">· tap a trade for its chart</span></h2>${tr.length?`<div class="scroll"><table><tr><th>Opened</th><th>Closed</th><th>Dir</th><th>Entry</th><th>Stop</th><th>Exit</th><th>R</th><th>Profit</th><th>Why</th></tr>${tr.map((t,i)=>{ const [a,x]=swRow("GI_",t,i,9); return `<tr ${a}><td class="mono muted">${esc(t.open_server)}</td><td class="mono muted">${esc(t.close_server)}</td><td>${esc(t.dir)}</td><td class="mono">${esc(t.entry)}</td><td class="mono">${esc(t.stop)}</td><td class="mono">${esc(t.exit)}</td><td class="mono">${sgn(t.R,2)}</td><td class="mono">${sgn(t.profit,0," $")}</td><td class="muted">${esc(t.reason)}</td></tr>`+x; }).join("")}</table></div>`:`<div class="empty">No trades yet. Expect about one every week or two (long only).</div>`}</section>
   <section class="card"><h2>Signals</h2>${(g.signals||[]).slice().reverse().slice(0,20).map(s=>`<div class="mono" style="font-size:12px;padding:5px 0;border-top:1px solid var(--line)">${esc(s.time_server)} · ${esc(s.action)}</div>`).join("")||'<div class="empty">No signals yet.</div>'}</section>
@@ -337,6 +350,8 @@ function vRSI(){
    <section class="card side"><div class="lbl">Position</div>${p?`<div class="big">${sgn(p.profit,0," $")}</div><div class="muted" style="margin-top:6px">${num(p.lots)} lots @ ${esc(p.entry)} · stop ${esc(p.sl)} · since ${esc(p.opened)}</div><div class="muted" style="font-size:12px;margin-top:4px">Exits at 15:55 NY on the first close above the 5-day average</div>`:`<div class="big muted">Flat</div><div class="muted" style="margin-top:6px">Waiting for a dip</div>`}</section>
    <section class="card side"><div class="lbl">Closed trades</div><div class="big">${sgn(tot,0," $")}</div><div class="muted" style="margin-top:6px">${tr.length} trades · ${tr.length?Math.round(100*wins/tr.length):0}% win · DD ${num(st.dd_total)}% from peak</div></section>
   </div>
+  ${condRS(st)}
+  ${scoreCard((rs.trades||[]).map(t=>{ const e=+t.entry,sl=+t.stop,x=+t.exit; return {R:(e&&sl&&e!==sl&&x)?(x-e)/(e-sl):null,profit:t.profit,t:srvDate(t.close_server)}; }),BT.RS)}
   ${p?`<section class="card"><h2>Open trade</h2>${swChart("RS_",{...p,dir:p.dir||"long"},false)}</section>`:""}
   <section class="card"><h2>Trade log <span class="muted" style="font-size:12px;font-weight:400">· tap a trade for its chart</span></h2>${tr.length?`<div class="scroll"><table><tr><th>Opened</th><th>Closed</th><th>Entry</th><th>Stop</th><th>Exit</th><th>Move</th><th>Profit</th><th>Why</th></tr>${tr.map((t,i)=>{ const [a,x]=swRow("RS_",t,i,8); return `<tr ${a}><td class="mono muted">${esc(t.open_server)}</td><td class="mono muted">${esc(t.close_server)}</td><td class="mono">${esc(t.entry)}</td><td class="mono">${esc(t.stop)}</td><td class="mono">${esc(t.exit)}</td><td class="mono">${sgn(t.pct_move,2,"%")}</td><td class="mono">${sgn(t.profit,0," $")}</td><td class="muted">${esc(t.reason)}</td></tr>`+x; }).join("")}</table></div>`:`<div class="empty">No trades yet. Expect about one a month.</div>`}</section>
   <section class="card"><h2>Signals</h2>${(rs.signals||[]).slice().reverse().slice(0,20).map(s=>`<div class="mono" style="font-size:12px;padding:5px 0;border-top:1px solid var(--line)">${esc(s.time_ny)} · RSI ${esc(s.rsi2)} · ${esc(s.action)}</div>`).join("")||'<div class="empty">No signals yet.</div>'}</section>
@@ -350,8 +365,8 @@ function banner(){ if(["pf","sc","rs","gi"].includes(tab)) return ""; const a=S.
   if(a>30) return `<div class="banner">EA status is ${Math.round(a)}s old. MT5 or the EA may have stopped.</div>`; return ""; }
 function draw(){ if(!S) return; const st=S.status||{}; $("#k-eq").textContent=st.equity?(+st.equity).toLocaleString(undefined,{maximumFractionDigits:0}):"-"; $("#k-dd").textContent=st.dd_day!=null?num(st.dd_day)+"%":"-";
   const live=S.status_age!=null&&S.status_age<30; $("#k-st").innerHTML=`<span class="dot" style="background:${live?(st.paused?"#F2C94C":"#2EC4A6"):"#FF8A4C"}"></span>${live?(st.paused?"Paused":"EA live"):"EA offline"}`;
-  const v={pf:vPortfolio,all:vAll,sc:vScalper,rs:vRSI,gi:vGI,ov:vOverview,cal:vCal,ev:vEvent,log:vLog,live:vLive,shadow:vShadow,set:vSettings}[tab]||vOverview;
-  const y=scrollY; const ae=document.activeElement; if(ae&&ae.tagName==="INPUT"&&ae.type==="text") return; $("#app").innerHTML=(isNC(tab)?ncSub():"")+v(); scrollTo(0,y); }
+  const v={pf:vPortfolio,all:vAll,gp:vGP,sc:vScalper,rs:vRSI,gi:vGI,ov:vOverview,cal:vCal,ev:vEvent,log:vLog,live:vLive,shadow:vShadow,set:vSettings}[tab]||vOverview;
+  const y=scrollY; const ae=document.activeElement; if(ae&&ae.tagName==="INPUT"&&ae.type==="text") return; $("#app").innerHTML=groupSub()+(isNC(tab)?ncSub():"")+v(); scrollTo(0,y); }
 
 
 // ===================== charts for every system (v4b) =====================
@@ -372,6 +387,111 @@ function ncShadowChart(x){ const rows=csvRows(fileTxt("NC_snap_"+String(x.releas
    `<div class="lg"><span>5-minute candles · news candle shaded</span><span><b style="color:#E6EAF0">▲▼</b> entry</span><span><b style="color:#7FB2FF">▲▼</b> exit (${esc(x.exit_type)})</span><span class="neg">— SL</span><span class="pos">— TP</span></div>`; }
 function ncOpenMark(p){ const r=(S.trades||[]).filter(t=>t.symbol===p.symbol&&(t.event==="OPEN"||t.event==="FILL")&&(t.tag===p.tag||(p.tag&&t.tag.startsWith(p.tag))||!p.tag)).pop();
   return r?{t:srvDate(r.time_server),v:+p.open,c:"#E6EAF0",up:isLong(p.dir),label:"Entry"}:null; }
+
+
+// ===================== scorecards, conditions, account guard (v7) =====================
+const BT={GP:{avgR:0.30,win:0.60,note:"research 2019–26 (MT5 2021–26: PF 1.59)"},RS:{win:0.78,pf:2.74,note:"MT5 2020–26, 88 trades"},
+  GI:{avgR:0.57,note:"2023–26, longs only"},SC:{G0:0.15,GF1:0.18,LATE:0.21,IDX5:0.22,IDX:null,FX:null,OTH:null,STK:null},NC:null};
+function nyLocal(min){ const now=new Date(), ny=new Date(now.toLocaleString("en-US",{timeZone:"America/New_York"})); let d=min-(ny.getHours()*60+ny.getMinutes()); if(d<0) d+=1440; return hm(new Date(now.getTime()+d*6e4)); }
+function nyMinNow(){ const ny=new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"})); return ny.getHours()*60+ny.getMinutes(); }
+function scoreCard(list,exp,title){ const L=list.filter(x=>x.t).sort((a,b)=>a.t-b.t), n=L.length;
+  const hasR=L.some(x=>x.R!=null&&!isNaN(x.R)), hasP=L.some(x=>x.profit!=null&&x.profit!==""&&!isNaN(+x.profit));
+  const Rs=L.map(x=>+x.R||0), Ps=L.map(x=>+x.profit||0), w=L.filter((x,i)=>hasR?Rs[i]>0:Ps[i]>0).length;
+  const totR=Rs.reduce((a,b)=>a+b,0), totP=Ps.reduce((a,b)=>a+b,0);
+  const gw=(hasP?Ps:Rs).filter(v=>v>0).reduce((a,b)=>a+b,0), gl=-(hasP?Ps:Rs).filter(v=>v<0).reduce((a,b)=>a+b,0);
+  let eq=0,pk=0,dd=0; (hasP?Ps:Rs).forEach(v=>{ eq+=v; pk=Math.max(pk,eq); dd=Math.min(dd,eq-pk); });
+  let st=0; for(let i=n-1;i>=0;i--){ const win=(hasR?Rs[i]:Ps[i])>0; if(i===n-1){ st=win?1:-1; continue; } if(win&&st>0) st++; else if(!win&&st<0) st--; else break; }
+  const cut=Date.now()-30*864e5, l30=L.map((x,i)=>i).filter(i=>L[i].t>=cut), l30R=l30.reduce((a,i)=>a+Rs[i],0), l30P=l30.reduce((a,i)=>a+Ps[i],0);
+  const cell=(k,v)=>`<div><div class="lbl">${k}</div><div class="mono">${v}</div></div>`;
+  const vs=exp?[exp.avgR!=null?`avg ${sgn(exp.avgR,2,"R")}`:"",exp.win!=null?`win ${Math.round(exp.win*100)}%`:"",exp.pf!=null?`PF ${exp.pf}`:""].filter(Boolean).join(" · ")+` <span class="muted">(${esc(exp.note)})</span>`:'<span class="muted">no backtest yet</span>';
+  return `<section class="card"><h2>${title||"Scorecard"}</h2><div class="grid5" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px">
+   ${cell("Trades",n)}${cell("Win %",n?Math.round(100*w/n)+"%":"-")}${cell("Avg R",hasR&&n?sgn(totR/n,2,"R"):"-")}${cell("Total R",hasR&&n?sgn(totR,2,"R"):"-")}${cell("P&L",hasP&&n?sgn(totP,0," $"):"-")}
+   ${cell("Profit factor",n&&gl>0?(gw/gl).toFixed(2):(n&&gw>0?"∞":"-"))}${cell("Max drawdown",n?(hasP?sgn(dd,0," $"):sgn(dd,2,"R")):"-")}${cell("Streak",n?(st>0?`<span class="pos">${st} win${st>1?"s":""}</span>`:`<span class="neg">${-st} loss${st<-1?"es":""}</span>`):"-")}
+   ${cell("Last 30 days",l30.length?(hasR?sgn(l30R,2,"R"):sgn(l30P,0," $"))+` <span class="muted">(${l30.length})</span>`:"-")}</div>
+   <div style="margin-top:12px;font-size:13px">Live ${n?(hasR?`avg ${sgn(totR/n,2,"R")}`:"")+` · win ${Math.round(100*w/n)}%`+(gl>0?` · PF ${(gw/gl).toFixed(2)}`:""):"—"} <span class="muted">vs backtest</span> ${vs}</div></section>`; }
+const ok=(b,t)=>`<span style="color:${b?"#2EC4A6":"#9AA4B2"}">${b?"✔":"○"}</span> ${t}`;
+function vGuard(){ const g=S.ag||{}, st=g.status||{};
+  if(g.status_age==null) return `<section class="card"><h2>Account guard</h2><div class="banner">Not running yet. Attach AG_AccountGuard_EA to any chart: it watches daily / weekly / monthly loss across the whole account.</div></section>`;
+  const row=(k,lbl,set)=>{ const x=st[k]||{}, pct=+x.dd_pct||0, lim=+x.limit||0, f=lim>0?Math.min(100,pct/lim*100):0;
+    return `<div style="flex:1 1 200px"><div style="display:flex;justify-content:space-between"><span class="lbl">${lbl}</span><span class="mono" style="font-size:12px">${num(pct)}% of ${num(lim,1)}%</span></div>
+     <div class="meter" style="margin-top:6px"><span style="width:${f}%;background:${f>=100?"#FF8A4C":(f>=60?"#F2C94C":"#2EC4A6")}"></span></div>
+     <div class="muted" style="font-size:12px;margin-top:4px">P&L ${sgn(x.pnl,0," $")} since ${esc((x.start||"").slice(0,10))}</div>
+     <label class="tg" style="margin-top:6px"><span style="font-size:12px">Limit %</span><input type="text" style="width:70px" value="${num(lim,1)}" onchange="cmd('SET','${set}='+this.value,'AG')"></label></div>`; };
+  return `<section class="card" style="${st.blocked?"border-color:#FF8A4C":""}"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Account guard · whole account</h2><span class="mono" style="font-size:12px">${eaDot(g)} · equity ${(+st.equity||0).toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+   ${st.blocked?`<div class="banner" style="margin-top:10px">⛔ New trades blocked on every system: ${esc(st.block_reason)} · until ${esc(st.blocked_until)} server time</div>`:`<div class="muted" style="font-size:12px;margin-top:6px">Every system checks this before opening a trade. Hitting a limit blocks new trades until that day / week / month ends.</div>`}
+   <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:12px">${row("DAY","Daily loss","DD_DAY")}${row("WEEK","Weekly loss","DD_WEEK")}${row("MONTH","Monthly loss","DD_MONTH")}</div>
+   <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center">
+    <label class="tg" style="margin:0"><span>Also close everything when a limit is hit</span><input type="checkbox" ${st.close_on_breach?"checked":""} onchange="cmd('SET','CLOSE_ON_BREACH='+(this.checked?1:0),'AG')"></label>
+    ${st.blocked?`<button class="btn" onclick="cmd('SET','UNBLOCK=1','AG')">Unblock now</button>`:""}
+    <button class="btn warn" onclick="if(confirm('Close EVERY position and pending order on the account?')) cmd('CLOSE_ALL','','AG')">Close everything</button></div>
+   ${(g.events||[]).slice(-4).reverse().map(e=>`<div class="mono muted" style="font-size:12px;padding:3px 0">${esc(e.time_server)} · ${esc(e.event)} · ${esc(e.detail)}</div>`).join("")}</section>`; }
+function condGP(st){ const pv=st.preview||[];
+  return `<section class="card"><h2>Conditions · next check ${esc(st.next_check||"")} <span class="muted" style="font-size:12px;font-weight:400">(${nyLocal(570)} your time)</span></h2>
+   <div class="muted" style="font-size:12px">Trades when the gap is ≥ ${num(st.min_gap_atr)} × daily ATR and the overnight move has already pulled back ≥ ${Math.round((+st.min_retrace||0)*100)}% · ${st.news_morning?'<span class="neg">CPI/NFP morning — will skip</span>':"no CPI/NFP that morning"}</div>
+   ${pv.length?`<div class="scroll" style="margin-top:8px"><table><tr><th>Index</th><th>Prev close</th><th>Now</th><th>Overnight high / low</th><th>Gap</th><th>Retrace</th><th>If it opened now</th></tr>${pv.map(x=>`<tr><td class="mono">${esc(x.symbol)}</td><td class="mono">${esc(x.prev_close)}</td><td class="mono">${esc(x.price)}</td><td class="mono">${esc(x.on_high)} / ${esc(x.on_low)}</td>
+     <td>${ok(+x.gap_atr>=+st.min_gap_atr,num(x.gap_atr)+" ATR")}</td><td>${ok(+x.retrace>=+st.min_retrace,Math.round((+x.retrace||0)*100)+"%")}</td><td class="${/would/.test(x.verdict)?"pos":"muted"}">${esc(x.verdict)}</td></tr>`).join("")}</table></div>`:`<div class="muted" style="margin-top:8px">During the session the 9:30 result is shown above; the preview for the next open starts after 4pm NY.</div>`}</section>`; }
+function condRS(st){ const c=st.cond||{}, p=st.position, rl=+c.rsi_live;
+  return `<section class="card"><h2>Conditions</h2><div style="display:flex;flex-wrap:wrap;gap:22px;font-size:13px">
+   <div>${ok(rl<+c.threshold,`RSI(2) on the live price <b class="mono">${num(rl,1)}</b> (needs below ${num(c.threshold,0)})`)}<div class="muted" style="font-size:12px">Last daily close: ${num(st.rsi2,1)} · decides at 15:55 NY (${nyLocal(+c.entry_nymin||955)} your time)</div></div>
+   <div>${p?ok(+c.price>+c.sma5_live,`Exit line: price <b class="mono">${num(c.price)}</b> vs 5-day average <b class="mono">${num(c.sma5_live)}</b>`)+`<div class="muted" style="font-size:12px">Sells at 15:55 NY once price is above the line · held ${c.days_held>=0?c.days_held:0} day(s)</div>`:`<span class="muted">If it bought now: stop ${num(c.stop_if_now)} (${num(c.stop_atr,0)} × ATR ${num(c.atr)})</span>`}</div>
+   <div class="muted">Spread ${num(c.spread)} · price ${num(c.price)}</div></div></section>`; }
+function condGI(st){ const c=st.cond||{}, p=st.position, inside=+c.y_high<+c.p_high&&+c.y_low>+c.p_low;
+  return `<section class="card"><h2>Conditions</h2><div style="display:flex;flex-wrap:wrap;gap:22px;font-size:13px">
+   <div>${ok(inside,"Yesterday was an inside day")}<div class="muted mono" style="font-size:12px">Yesterday ${num(c.y_high)} – ${num(c.y_low)} · day before ${num(c.p_high)} – ${num(c.p_low)}</div>
+    <div class="muted" style="font-size:12px">${ok(+c.y_high<+c.p_high,"high below "+num(c.p_high))} · ${ok(+c.y_low>+c.p_low,"low above "+num(c.p_low))}</div></div>
+   <div>${p?`Trailing stop <b class="mono">${esc(p.sl)}</b> · day ${c.days_held>=0?c.days_held:0} of ${c.max_days}`:(inside?`Buy stop at <b class="mono">${num(c.buy_level)}</b> · price ${num(c.price)} (${num(+c.buy_level-+c.price)} away)`+(st.shorts?` · sell stop ${num(c.sell_level)}`:""):`<span class="muted">No setup today · price ${num(c.price)}</span>`)}</div></div></section>`; }
+const SC_WIN={IDX:[570,690],G0:[600,660],GF1:[570,690],STK:[570,690],FX:[570,690],OTH:[570,960],LATE:[930,960],IDX5:[570,960]};
+function condSC(sc){ const st=sc.status||{}, set=st.settings||{}, now=nyMinNow(), sig=sc.signals||[], wk=new Date().getDay()%6!==0;
+  return `<section class="card"><h2>Conditions</h2><div class="muted" style="font-size:12px">Daily loss used ${num(st.dd_day)}% of ${num(set.DD_DAY,1)}% · ${num(st.dd_total)}% below peak of ${num(set.DD_TOTAL,1)}% · one US index per direction: ${set.ONE_IDX?"on":"off"}${st.block?` · <span class="neg">blocked: ${esc(st.block)}</span>`:""}</div>
+   <div class="scroll" style="margin-top:8px"><table><tr><th>Module</th><th>Mode</th><th>Window (NY)</th><th>Now</th><th>Last signal</th><th>Backtest avg</th></tr>${SC_MODS.map(([k,name])=>{ const w=SC_WIN[k], open=wk&&now>=w[0]&&now<w[1], m=+(set[k]??0), ls=sig.filter(x=>x.module===k).pop(), f=v=>String(Math.floor(v/60)).padStart(2,"0")+":"+String(v%60).padStart(2,"0");
+     return `<tr><td><b class="mono">${k}</b> <span class="muted">${esc(name)}</span></td><td style="color:${MODE_COL[m]}">${MODE_TXT[m]}</td><td class="mono">${f(w[0])}–${f(w[1])} <span class="muted">(${nyLocal(w[0])})</span></td><td>${ok(open,open?"open":"closed")}</td><td class="mono muted" style="font-size:12px">${ls?esc((ls.time_ny||"").slice(5,16))+" "+esc(ls.symbol)+" "+esc(ls.dir)+" · "+esc(ls.action):"-"}</td><td class="mono">${BT.SC[k]!=null?sgn(BT.SC[k],2,"R"):'<span class="muted">untested / failed</span>'}</td></tr>`; }).join("")}</table></div></section>`; }
+function condNC(){ const st=S.status||{}, s=st.settings||{}, nx=upcomingNext()[0];
+  return `<section class="card"><h2>Conditions</h2><div style="display:flex;flex-wrap:wrap;gap:22px;font-size:13px">
+   <div>Next release: <b>${nx?esc(nx.currency+" "+nx.name):"none tracked"}</b>${nx?` <span class="muted">${fmt(nx.t)}</span>`:""}</div>
+   <div>Momentum filter ≥ <b class="mono">${num(s.MOMTHR,3)}</b> · max ${esc(s.MAXREL)} trades per release · gold on USD news: ${s.GOLD?"on":"off"}</div>
+   <div>Plans — FX: ${["A","B","C"].map(x=>ok(s["FX_"+x],x)).join(" ")} · Index/gold: ${["A","B","C"].map(x=>ok(s["IX_"+x],x)).join(" ")}</div>
+   <div>${st.block?`<span class="neg">Blocked: ${esc(st.block)}</span>`:ok(true,"No loss limit blocking")}</div></div>
+   <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">
+    <label class="tg" style="margin:0"><span>Plan A / C risk %</span><input type="text" value="${num(s.RISK_A)}" onchange="cmd('SET','RISK_A='+this.value)"></label>
+    <label class="tg" style="margin:0"><span>Plan B (cover) risk %</span><input type="text" value="${num(s.RISK_B)}" onchange="cmd('SET','RISK_B='+this.value)"></label></div></section>`; }
+// ===================== Gap fade (v6) =====================
+function gpPairs(){ const g={}; ((S.gp||{}).trades||[]).forEach(t=>{ const k=t.open_server+"|"+t.symbol; (g[k]=g[k]||{open_server:t.open_server,symbol:t.symbol,dir:t.dir,entry:t.entry,stop:t.stop,legs:[]}).legs.push(t); });
+  return Object.values(g).map(x=>{ const A=x.legs.find(l=>+l.target>0), B=x.legs.find(l=>!(+l.target>0)); const lots=x.legs.reduce((a,l)=>a+(+l.lots||0),0);
+    const R=lots?x.legs.reduce((a,l)=>a+(+l.R||0)*(+l.lots||0),0)/lots:null; const close=x.legs.map(l=>l.close_server).sort().pop();
+    return {...x,A,B,R,profit:x.legs.reduce((a,l)=>a+(+l.profit||0),0),close_server:close,target:A?A.target:"",
+      why:[A?"½ "+A.reason:"",B?"runner "+B.reason:""].filter(Boolean).join(" · ")}; }).sort((a,b)=>a.open_server<b.open_server?1:-1); }
+let gpSel=null;
+function gpChart(t,open){ const rows=csvRows(fileTxt("GP_snap_"+t.symbol+"_"+String(t.open_server||t.opened).replace(/[.: ]/g,"")+".csv"));
+  if(!rows.length) return `<div class="empty">No chart saved for this trade yet.</div>`;
+  const L=isLong(t.dir), lines=[{v:+t.entry,c:"#E6EAF0"},{v:+(t.stop||t.sl),c:"#FF8A4C",d:1},{v:+(t.target||t.tp),c:"#2EC4A6",d:1}], marks=[{t:srvDate(t.open_server||t.opened),v:+t.entry,c:"#E6EAF0",up:L,label:"Entry"}];
+  if(!open) (t.legs||[]).forEach(l=>marks.push({t:srvDate(l.close_server),v:+l.exit,c:+l.target>0?"#2EC4A6":"#7FB2FF",up:!L,label:(+l.target>0?"Half exit ":"Runner exit ")+l.reason}));
+  return candles(rows,{W:900,H:240,lines,marks})+`<div class="lg"><span>5-minute candles</span><span><b style="color:#E6EAF0">▲▼</b> entry</span><span><b style="color:#2EC4A6">▲▼</b> half at target</span><span><b style="color:#7FB2FF">▲▼</b> runner exit</span><span class="neg">- - stop</span><span class="pos">- - target</span></div>`; }
+function vGP(){
+  const g=S.gp||{}, st=g.status||{}, pos=st.positions||[];
+  if(g.status_age==null) return `<h1>Gap fade</h1><div class="banner">No status from GP_GapFade_EA yet. Attach it to a chart in this MT5 terminal.</div>`;
+  const tr=gpPairs(), wins=tr.filter(t=>t.R>0).length, totR=tr.reduce((a,t)=>a+(t.R||0),0);
+  const legs=g.trades||[], aP=legs.filter(l=>+l.target>0).reduce((a,l)=>a+(+l.profit||0),0), bP=legs.filter(l=>!(+l.target>0)).reduce((a,l)=>a+(+l.profit||0),0);
+  const today=st.today||[], bySym={}; pos.forEach(p=>{ (bySym[p.symbol]=bySym[p.symbol]||[]).push(p); });
+  return `<h1>Gap fade · NAS100 · US500 · US30</h1><div class="muted" style="font-size:12px">Fades the 9:30 NY gap when the overnight move has already pulled back · half off at half the gap, runner to 3:59pm at breakeven</div>
+  <div class="row">
+   <section class="card side"><div class="lbl">Today's 9:30 check</div>${today.length?today.map(x=>`<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px"><b class="mono">${esc(x.symbol)}</b> <span class="muted mono">gap ${num(x.gap_atr)} ATR · retrace ${Math.round((+x.retrace||0)*100)}%</span><div class="muted" style="font-size:12px">${esc(x.action)}</div></div>`).join(""):`<div class="muted" style="margin-top:6px">Runs at 9:30 NY (1:30am AEDT) on weekdays</div>`}</section>
+   <section class="card side"><div class="lbl">Open</div>${pos.length?Object.entries(bySym).map(([s,ps])=>`<div style="margin-top:6px"><b class="mono">${esc(s)}</b> ${esc(ps[0].dir)} · ${sgn(ps.reduce((a,p)=>a+(+p.profit||0),0),0," $")}<div class="muted" style="font-size:12px">${ps.map(p=>(p.leg==="A"?"target half":"runner")+" "+num(p.lots)+" lots, stop "+esc(p.sl)).join(" · ")}</div></div>`).join(""):`<div class="big muted">Flat</div>`}</section>
+   <section class="card side"><div class="lbl">Closed trades</div><div class="big">${sgn(totR,2,"R")}</div><div class="muted" style="margin-top:6px">${tr.length} trades · ${tr.length?Math.round(100*wins/tr.length):0}% win · DD ${num(st.dd_total)}% from peak</div><div class="muted" style="margin-top:4px;font-size:12px">Target halves ${sgn(aP,0," $")} · runners ${sgn(bP,0," $")}</div></section>
+  </div>
+  ${condGP(st)}
+  ${scoreCard(tr.map(t=>({R:t.R,profit:t.profit,t:srvDate(t.close_server)})),BT.GP)}
+  ${Object.entries(bySym).map(([s,ps])=>`<section class="card"><h2>Open · ${esc(s)}</h2>${gpChart({symbol:s,dir:ps[0].dir,entry:ps[0].entry,sl:ps[0].sl,tp:(ps.find(p=>p.leg==="A")||{}).tp,opened:ps[0].opened},true)}</section>`).join("")}
+  <section class="card"><h2>Trade log <span class="muted" style="font-size:12px;font-weight:400">· tap a trade for its chart</span></h2>${tr.length?`<div class="scroll"><table><tr><th>Opened</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>Stop</th><th>Target</th><th>R</th><th>Profit</th><th>Exits</th></tr>${tr.map(t=>{ const id=t.open_server+t.symbol, op=gpSel===id;
+     return `<tr style="cursor:pointer" onclick="gpSel=${op?"null":`'${esc(id)}'`};draw()"><td class="mono muted">${esc(t.open_server)}</td><td class="mono">${esc(t.symbol)}</td><td>${esc(t.dir)}</td><td class="mono">${esc(t.entry)}</td><td class="mono">${esc(t.stop)}</td><td class="mono">${esc(t.target)}</td><td class="mono">${sgn(t.R,2)}</td><td class="mono">${sgn(t.profit,0," $")}</td><td class="muted">${esc(t.why)}</td></tr>`+(op?`<tr><td colspan="9" style="padding:10px 4px 16px">${gpChart(t,false)}</td></tr>`:""); }).join("")}</table></div>`:`<div class="empty">No trades yet. Expect about 3–4 setups a month.</div>`}</section>
+  <section class="card"><h2>Signals</h2>${(g.signals||[]).slice().reverse().slice(0,24).map(x=>`<div class="mono" style="font-size:12px;padding:5px 0;border-top:1px solid var(--line)">${esc(x.time_server)} · <b>${esc(x.symbol)}</b> · gap ${num(x.gap_atr)} ATR · retrace ${Math.round((+x.retrace||0)*100)}% · ${esc(x.action)}</div>`).join("")||'<div class="empty">No signals yet.</div>'}</section>
+  <section class="card"><h2>Controls</h2><div style="display:flex;flex-wrap:wrap;gap:8px">
+   <button class="btn" onclick="cmd('${st.paused?"RESUME":"PAUSE"}','','GP')">${st.paused?"Resume":"Pause new trades"}</button>
+   <button class="btn warn" onclick="cmd('CLOSE_ALL','','GP')">Close all gap fade trades</button></div>
+   <label class="tg"><span>Longs (fade gap-downs)</span><input type="checkbox" ${st.longs!==false?"checked":""} onchange="cmd('SET','LONGS='+(this.checked?1:0),'GP')"></label>
+   <label class="tg"><span>Shorts (fade gap-ups)</span><input type="checkbox" ${st.shorts!==false?"checked":""} onchange="cmd('SET','SHORTS='+(this.checked?1:0),'GP')"></label>
+   <label class="tg"><span>Risk per day % (split across indices)</span><input type="text" value="${num(st.risk)}" onchange="cmd('SET','RISK='+this.value,'GP')"></label>
+   ${(g.cmd_results||[]).slice(-6).reverse().map(r=>`<div class="mono muted" style="font-size:12px;padding:3px 0">${esc(r.time_server)} · ${esc(r.command)} ${esc(r.arg)} · ${esc(r.result)}</div>`).join("")}</section>`;
+}
 // ===================== unified trade log (v4) =====================
 let LF={sys:"",mode:"",st:"",sym:"",dir:"",per:"30",n:150}, allSel=null;
 const isLong=d=>/buy|long/i.test(d||"");
@@ -384,6 +504,9 @@ function allTrades(){ const out=[];
   const rsp=(rs.status||{}).position; if(rsp) out.push({sys:"RSI(2)",sub:"US500 dip",mode:"live",sym:(rs.status||{}).symbol||"US500",long:true,op:srvDate(rsp.opened||rsp.open_server),cl:null,entry:rsp.entry||rsp.price,exit:"",R:null,profit:rsp.profit,why:"open",id:"rso",chart:()=>swChart("RS_",{...rsp,dir:"long"},false)});
   (gi.trades||[]).forEach(t=>out.push({sys:"Gold inside-day",sub:"breakout",mode:"live",sym:t.symbol,long:isLong(t.dir),op:srvDate(t.open_server),cl:srvDate(t.close_server),entry:t.entry,exit:t.exit,R:t.R===""?null:+t.R,profit:t.profit,why:t.reason,id:"gi|"+t.open_server,chart:()=>swChart("GI_",t,true)}));
   const gip=(gi.status||{}).position; if(gip) out.push({sys:"Gold inside-day",sub:"breakout",mode:"live",sym:(gi.status||{}).symbol||"XAUUSD",long:isLong(gip.dir),op:srvDate(gip.opened||gip.open_server),cl:null,entry:gip.entry||gip.price,exit:"",R:null,profit:gip.profit,why:"open",id:"gio",chart:()=>swChart("GI_",gip,false)});
+  gpPairs().forEach(t=>out.push({sys:"Gap fade",sub:"9:30 gap",mode:"live",sym:t.symbol,long:isLong(t.dir),op:srvDate(t.open_server),cl:srvDate(t.close_server),entry:t.entry,exit:(t.B||t.A||{}).exit,R:t.R,profit:t.profit,why:t.why,id:"gp|"+t.open_server+t.symbol,chart:()=>gpChart(t,false)}));
+  ((S.gp||{}).status||{}).positions&&[...new Set(S.gp.status.positions.map(p=>p.symbol))].forEach(sy=>{ const ps=S.gp.status.positions.filter(p=>p.symbol===sy), p=ps[0];
+    out.push({sys:"Gap fade",sub:"9:30 gap",mode:"live",sym:sy,long:isLong(p.dir),op:srvDate(p.opened),cl:null,entry:p.entry,exit:"",R:null,profit:ps.reduce((a,q)=>a+(+q.profit||0),0),why:"open",id:"gpo|"+sy,chart:()=>gpChart({symbol:sy,dir:p.dir,entry:p.entry,sl:p.sl,tp:(ps.find(q=>q.leg==="A")||{}).tp,opened:p.opened},true)}); });
   tradeGroups().forEach(t=>out.push({sys:"News & Cover",sub:"Plan "+t.plan,mode:"live",sym:t.sym,long:isLong(t.open.dir),op:t.t,cl:t.exit?srvDate(t.exit.time_server):null,entry:t.open.price,exit:t.exit?t.exit.price:"",R:t.R,why:t.exit?t.why:"open",id:"nc|"+t.tag+"#"+t.sym,nck:t.tag+"#"+t.sym}));
   (S.shadow||[]).forEach(x=>out.push({sys:"News & Cover",sub:"Plan "+x.plan+(x.breakeven&&x.breakeven!=="0"&&!/no/i.test(x.breakeven)?" · BE":"")+(x.role==="PICKED"?"":" · not picked"),mode:"shadow",sym:x.symbol,long:isLong(x.dir),op:srvDate(x.entry_time)||srvDate(x.release),cl:srvDate(x.exit_time),entry:x.entry,exit:"",R:x.result_R===""?null:+x.result_R,why:x.exit_type,id:"ncs|"+x.release+x.symbol+x.plan+x.breakeven+x.role,chart:()=>ncShadowChart(x)}));
   return out.sort((a,b)=>(b.op||0)-(a.op||0)); }
@@ -400,7 +523,7 @@ function vAll(){ const all=allTrades(), now=Date.now();
     return `<tr style="cursor:pointer" onclick="allSel=${open?"null":`'${esc(t.id).replace(/'/g,"")}'`};draw()"><td class="mono muted" style="white-space:nowrap">${fmt(t.op)}</td><td>${esc(t.sys)}</td><td class="muted">${esc(t.sub)}</td><td><span class="tag" style="color:${t.mode==="live"?"#F2C94C":"#7FB2FF"};border-color:${t.mode==="live"?"#F2C94C":"#7FB2FF"}">${t.mode.toUpperCase()}</span></td><td class="mono">${esc(t.sym)}</td><td class="${t.long?"pos":"neg"}">${t.long?"▲ long":"▼ short"}</td><td class="mono muted" style="white-space:nowrap">${t.cl?fmt(t.cl):"open"}</td><td class="mono">${t.R==null||isNaN(t.R)?"-":sgn(t.R,2,"R")}</td><td class="muted" style="font-size:12px">${esc(t.why||"")}</td></tr>`+ex; }).join("");
   return `<h1>Trade log</h1><div class="muted" style="font-size:12px">Every trade on every system, live and shadow · tap a trade for its chart</div>
   <section class="card"><div style="display:flex;flex-wrap:wrap;gap:8px">
-   ${opt("sys",[["","All systems"],["Scalper","Scalper"],["RSI(2)","RSI(2)"],["Gold inside-day","Gold inside-day"],["News & Cover","News & Cover"]])}
+   ${opt("sys",[["","All systems"],["Scalper","Scalper"],["RSI(2)","RSI(2)"],["Gold inside-day","Gold inside-day"],["Gap fade","Gap fade"],["News & Cover","News & Cover"]])}
    ${opt("mode",[["","Live + shadow"],["live","Live only"],["shadow","Shadow only"]])}
    ${opt("st",[["","Open + closed"],["open","Open"],["closed","Closed"]])}
    ${opt("sym",[["","All symbols"]].concat(syms.map(x=>[x,x])))}
@@ -427,7 +550,7 @@ function buildState(){
     upcoming:Object.values(up).sort((a,b)=>(a.time_server||"").localeCompare(b.time_server||"")),
     schedule:csvRows(fileTxt("NC_schedule.csv")),releases:csvRows(fileTxt("NC_releases.csv")),candidates:csvRows(fileTxt("NC_candidates.csv")),
     trades:csvRows(fileTxt("NC_trades.csv")),shadow:csvRows(fileTxt("NC_shadow.csv")),cmd_results:csvRows(fileTxt("NC_command_results.csv")),
-    live,news:jsonFile("news.json"),sc:eaFiles("SC_"),rs:eaFiles("RS_"),gi:eaFiles("GI_")}; }
+    live,news:jsonFile("news.json"),sc:eaFiles("SC_"),rs:eaFiles("RS_"),gi:eaFiles("GI_"),gp:eaFiles("GP_"),ag:{...eaFiles("AG_"),events:csvRows(fileTxt("AG_events.csv"))}}; }
 async function load(){ if(loading) return; loading=true;
   try{ let q=SB.from("term_files").select("name,content,updated_at").order("updated_at",{ascending:true}).limit(1000);
     if(lastSeen) q=q.gt("updated_at",lastSeen);
