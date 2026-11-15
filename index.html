@@ -82,7 +82,7 @@ label.tg input[type=text]{width:80px;background:var(--in);color:var(--tx);border
 </div>
 <script>
 const TABS=[["pf","Portfolio","pf"],["all","Trade log","all"],["scal","Scalping","sc"],["day","Day trading","gp"],["swing","Swing","rs"]];
-const GROUPS={scal:[["sc","Burst Scalper"]],day:[["gp","Gap fade"],["ov","News & Cover"]],swing:[["rs","RSI(2)"],["gi","Gold inside-day"]]};
+const GROUPS={scal:[["sc","Burst Scalper"]],day:[["gp","Gap fade"],["oe","ORB × EMA"],["ov","News & Cover"]],swing:[["rs","RSI(2)"],["gi","Gold inside-day"]]};
 const NCSUB=[["ov","Overview"],["cal","Calendar"],["ev","Event"],["log","Trades"],["live","Live charts"],["shadow","Shadow"],["set","Settings"]];
 const isNC=k=>NCSUB.some(([x])=>x===k);
 let S=null, tab=location.hash.slice(1)||"pf", selRel=null, openTrade=null, liveOnlyOpen=false, calOpen={m:true,w:true,d:true}, snapCache={};
@@ -96,7 +96,7 @@ const fmt=(d,o)=>d?d.toLocaleString(undefined,o||{weekday:"short",day:"2-digit",
 const hm=d=>d?d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}):"";
 const nyt=d=>d?d.toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}):"";
 const num=(v,d=2)=>v===""||v==null||isNaN(+v)?"-":(+v).toFixed(d);
-async function cmd(c,arg="",ea="NC"){ const nm={NC:"News & Cover",SC:"Burst Scalper",RS:"RSI(2)",GI:"Gold inside-day",GP:"Gap fade",AG:"Account guard"}[ea];
+async function cmd(c,arg="",ea="NC"){ const nm={NC:"News & Cover",SC:"Burst Scalper",RS:"RSI(2)",GI:"Gold inside-day",GP:"Gap fade",OE:"ORB × EMA",AG:"Account guard"}[ea];
   if(c==="CLOSE_ALL"&&!confirm("Close every "+nm+" position"+(ea==="NC"?" and cancel pending covers":"")+"?")) return;
   const {error}=await SB.from("term_commands").insert({ea,cmd:c,arg:String(arg||"")}); if(error) alert("Command failed: "+error.message); setTimeout(load,2500); }
 function groupOf(k){ if(k==="pf"||k==="all") return k; if(isNC(k)) return "day"; for(const g in GROUPS) if(GROUPS[g].some(([x])=>x===k)) return g; return "pf"; }
@@ -258,6 +258,7 @@ function vPortfolio(){
   if(rss.position) rows.push(["RSI(2)",rss.symbol,"long","live",sgn(rss.position.profit,0," $")]);
   const gi=S.gi||{}, gis=gi.status||{}; if(gis.position) rows.push(["Gold inside-day",gis.symbol,gis.position.dir,"live",sgn(gis.position.profit,0," $")]);
   const gp=S.gp||{}, gps=gp.status||{}, gpT=gpPairs(); (gps.positions||[]).forEach(p=>rows.push(["Gap fade · "+(p.leg==="A"?"target half":"runner"),p.symbol,p.dir,"live",sgn(p.profit,0," $")]));
+  const oe=S.oe||{}, oes=oe.status||{}, oeT=oeTrades(); (oes.setups||[]).filter(x=>x.in_trade).forEach(x=>rows.push(["ORB × EMA · "+x.range_min+"m",x.symbol,x.dir,x.trade_mode,sgn(x.open_pct,2,"%")]));
   return `<h1>Portfolio</h1>
   ${vGuard()}
   <div class="row">
@@ -266,6 +267,7 @@ function vPortfolio(){
    ${card("RSI(2) swing",rs,`<div class="lbl" style="margin-top:12px">${rss.position?"In a trade":"Waiting for a dip"}</div><div class="big">RSI ${num(rss.rsi2,1)}</div><div class="muted" style="margin-top:6px">${rss.symbol||"US500"} · ${rsT.length} trades · closed P&L ${sgn(rsTot,0," $")}</div>`,"rs")}
    ${card("Gold inside-day",gi,`<div class="lbl" style="margin-top:12px">${gis.position?"In a trade":((gis.pending||[]).length?"Orders waiting":"Waiting for an inside day")}</div><div class="big">${sgn((gi.trades||[]).reduce((a,t)=>a+(+t.R||0),0),2,"R")}</div><div class="muted" style="margin-top:6px">${gis.symbol||"XAUUSD"} · ${(gi.trades||[]).length} trades · longs ${gis.longs===false?"off":"on"} · shorts ${gis.shorts?"on":"off"}</div>`,"gi")}
    ${card("Gap fade",gp,`<div class="lbl" style="margin-top:12px">${(gps.positions||[]).length?"In a trade":"Waits for the 9:30 gap"}</div><div class="big">${sgn(gpT.reduce((a,t)=>a+(t.R||0),0),2,"R")}</div><div class="muted" style="margin-top:6px">NAS100 · US500 · US30 · ${gpT.length} trades · longs ${gps.longs===false?"off":"on"} · shorts ${gps.shorts===false?"off":"on"}</div>`,"gp")}
+   ${card("ORB × EMA",oe,`<div class="lbl" style="margin-top:12px">Live closed</div><div class="big">${sgn(oeT.filter(t=>t.mode==="live").reduce((a,t)=>a+(+t.pct_gain||0),0),2,"%")}</div><div class="muted" style="margin-top:6px">NAS100 · US500 live · ${oeT.filter(t=>t.mode==="live").length} trades · shadow ${sgn(oeT.filter(t=>t.mode==="shadow").reduce((a,t)=>a+(+t.pct_gain||0),0),2,"%")} (${oeT.filter(t=>t.mode==="shadow").length})</div>`,"oe")}
   </div>
   <section class="card"><h2>Open trades, all strategies</h2>${rows.length?`<div class="scroll"><table><tr><th>Strategy</th><th>Symbol</th><th>Dir</th><th>Mode</th><th>Now</th></tr>${rows.map(r=>`<tr><td>${esc(r[0])}</td><td class="mono">${esc(r[1])}</td><td>${esc(r[2])}</td><td class="muted">${esc(r[3])}</td><td class="mono">${r[4]}</td></tr>`).join("")}</table></div>`:`<div class="empty">Nothing open right now.</div>`}</section>`;
 }
@@ -365,7 +367,7 @@ function banner(){ if(["pf","sc","rs","gi"].includes(tab)) return ""; const a=S.
   if(a>30) return `<div class="banner">EA status is ${Math.round(a)}s old. MT5 or the EA may have stopped.</div>`; return ""; }
 function draw(){ if(!S) return; const st=S.status||{}; $("#k-eq").textContent=st.equity?(+st.equity).toLocaleString(undefined,{maximumFractionDigits:0}):"-"; $("#k-dd").textContent=st.dd_day!=null?num(st.dd_day)+"%":"-";
   const live=S.status_age!=null&&S.status_age<30; $("#k-st").innerHTML=`<span class="dot" style="background:${live?(st.paused?"#F2C94C":"#2EC4A6"):"#FF8A4C"}"></span>${live?(st.paused?"Paused":"EA live"):"EA offline"}`;
-  const v={pf:vPortfolio,all:vAll,gp:vGP,sc:vScalper,rs:vRSI,gi:vGI,ov:vOverview,cal:vCal,ev:vEvent,log:vLog,live:vLive,shadow:vShadow,set:vSettings}[tab]||vOverview;
+  const v={pf:vPortfolio,all:vAll,gp:vGP,oe:vOE,sc:vScalper,rs:vRSI,gi:vGI,ov:vOverview,cal:vCal,ev:vEvent,log:vLog,live:vLive,shadow:vShadow,set:vSettings}[tab]||vOverview;
   const y=scrollY; const ae=document.activeElement; if(ae&&ae.tagName==="INPUT"&&ae.type==="text") return; $("#app").innerHTML=groupSub()+(isNC(tab)?ncSub():"")+v(); scrollTo(0,y); }
 
 
@@ -492,6 +494,69 @@ function vGP(){
    <label class="tg"><span>Risk per day % (split across indices)</span><input type="text" value="${num(st.risk)}" onchange="cmd('SET','RISK='+this.value,'GP')"></label>
    ${(g.cmd_results||[]).slice(-6).reverse().map(r=>`<div class="mono muted" style="font-size:12px;padding:3px 0">${esc(r.time_server)} · ${esc(r.command)} ${esc(r.arg)} · ${esc(r.result)}</div>`).join("")}</section>`;
 }
+// ===================== ORB x EMA (v7) =====================
+let oeSel=null, oeLF={mode:"",sym:""};
+const OE_GRP=s=>/^(NAS100|US500)$/.test(s)?"Indices":(s==="XAUUSD"?"Gold":(/^(AMD|AVGO|MU|INTC|TSM|ASML)\./.test(s)?"Chips":"Mag 7"));
+function oeTrades(){ return ((S.oe||{}).trades||[]).slice().sort((a,b)=>a.close_server<b.close_server?1:-1); }
+function pctCard(list,title,exp){ const L=list.filter(x=>x.t).sort((a,b)=>a.t-b.t), n=L.length, P=L.map(x=>+x.pct||0), Rs=L.map(x=>+x.R||0), w=P.filter(v=>v>0).length;
+  const tot=P.reduce((a,b)=>a+b,0), totR=Rs.reduce((a,b)=>a+b,0), gw=P.filter(v=>v>0).reduce((a,b)=>a+b,0), gl=-P.filter(v=>v<0).reduce((a,b)=>a+b,0);
+  let eq=0,pk=0,dd=0; P.forEach(v=>{ eq+=v; pk=Math.max(pk,eq); dd=Math.min(dd,eq-pk); });
+  const cut=Date.now()-30*864e5, l30=L.map((x,i)=>i).filter(i=>L[i].t>=cut), l30P=l30.reduce((a,i)=>a+P[i],0);
+  const cell=(k,v)=>`<div><div class="lbl">${k}</div><div class="mono">${v}</div></div>`;
+  return `<section class="card"><h2>${title}</h2><div class="grid5" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px">
+   ${cell("Total gain",n?sgn(tot,2,"%"):"-")}${cell("Trades",n)}${cell("Win %",n?Math.round(100*w/n)+"%":"-")}${cell("Avg per trade",n?sgn(tot/n,2,"%"):"-")}${cell("Max drawdown",n?sgn(dd,2,"%"):"-")}
+   ${cell("Profit factor",n&&gl>0?(gw/gl).toFixed(2):(n&&gw>0?"∞":"-"))}${cell("Last 30 days",l30.length?sgn(l30P,2,"%")+` <span class="muted">(${l30.length})</span>`:"-")}${cell("Total R",n?sgn(totR,2,"R"):"-")}</div>
+   ${exp?`<div style="margin-top:12px;font-size:13px"><span class="muted">Backtest at 1% risk:</span> ${exp}</div>`:""}</section>`; }
+function oeChart(t,open){ const rows=csvRows(fileTxt("OE_snap_"+t.snap+".csv"));
+  if(!rows.length) return `<div class="empty">No chart saved for this trade yet.</div>`;
+  const L=isLong(t.dir), lines=[{v:+t.range_high,c:"#B9A3FF",d:1},{v:+t.range_low,c:"#B9A3FF",d:1},{v:+t.entry,c:"#E6EAF0"},{v:+(t.stop||t.sl),c:"#FF8A4C",d:1},{v:+(t.target||t.tp),c:"#2EC4A6",d:1}];
+  const marks=[];
+  if(t.break_server) marks.push({t:srvDate(t.break_server),v:L?+t.range_high:+t.range_low,c:"#B9A3FF",up:L,label:"Break "+t.break_server});
+  if(t.retest_server) marks.push({t:srvDate(t.retest_server),v:L?+t.range_high:+t.range_low,c:"#F2C94C",up:L,label:"Retest "+t.retest_server});
+  marks.push({t:srvDate(t.open_server||t.opened),v:+t.entry,c:"#E6EAF0",up:L,label:"Entry"});
+  if(!open&&t.close_server) marks.push({t:srvDate(t.close_server),v:+t.exit,c:t.reason==="target"?"#2EC4A6":(t.reason==="stop"?"#FF8A4C":"#7FB2FF"),up:!L,label:"Exit "+t.reason});
+  return candles(rows,{W:900,H:260,lines,marks})+`<div class="lg"><span>1-minute candles from 9:15 NY</span><span style="color:#B9A3FF">- - opening range · ▲▼ break</span><span><b style="color:#F2C94C">▲▼</b> retest</span><span><b style="color:#E6EAF0">▲▼</b> entry</span><span>▲▼ exit</span><span class="neg">- - stop</span><span class="pos">- - target</span></div>`; }
+function vOE(){
+  const g=S.oe||{}, st=g.status||{}, su=st.setups||[];
+  if(g.status_age==null) return `<h1>ORB × EMA</h1><div class="banner">No status from OE_OrbEma_EA yet. Attach it to one chart in this MT5 terminal.</div>`;
+  const tr=oeTrades(), live=tr.filter(t=>t.mode==="live"), sh=tr.filter(t=>t.mode==="shadow");
+  const open=su.filter(x=>x.in_trade), liveSu=su.filter(x=>x.mode==="live");
+  const shBy={}; sh.forEach(t=>{ const k=t.symbol+" "+t.range_min+"m"; const o=shBy[k]=shBy[k]||{n:0,w:0,p:0,r:0,grp:OE_GRP(t.symbol)}; o.n++; o.p+=(+t.pct_gain||0); o.r+=(+t.R||0); if(+t.R>0) o.w++; });
+  const modeSel=x=>`<select onchange="cmd('SET','MODE:${esc(x.symbol)}:${x.range_min}='+this.value,'OE')" style="background:#0F141B;color:${x.mode==="live"?"#F2C94C":(x.mode==="shadow"?"#7FB2FF":"#9AA4B2")};border:1px solid #2A3340;border-radius:6px;padding:4px;font:inherit;font-size:12px">${["live","shadow","off"].map(m=>`<option ${x.mode===m?"selected":""}>${m}</option>`).join("")}</select>`;
+  const riskIn=x=>`<input type="text" style="width:52px;background:#0F141B;color:var(--tx);border:1px solid #2A3340;border-radius:6px;padding:4px;font:inherit;font-size:12px" value="${num(x.risk)}" onchange="cmd('SET','RISK:${esc(x.symbol)}='+this.value,'OE')">`;
+  const groups=["Indices","Gold","Mag 7","Chips"];
+  const condRows=groups.map(gn=>{ const xs=su.filter(x=>OE_GRP(x.symbol)===gn); if(!xs.length) return "";
+    return `<tr><td colspan="8" class="lbl" style="padding-top:12px">${gn}</td></tr>`+xs.map(x=>`<tr><td class="mono">${esc(x.symbol)} <span class="muted">${x.range_min}m</span></td><td>${modeSel(x)}</td><td>${riskIn(x)}%</td>
+     <td class="mono" style="font-size:12px">${x.range_high!=null?esc(x.range_low)+" – "+esc(x.range_high):'<span class="muted">from '+nyLocal(570+(+x.range_min||0))+'</span>'}</td>
+     <td>${ok(x.filter_now!=="no trade",esc(x.filter_now))}<div class="muted" style="font-size:11px">${esc(x.filter_detail)}</div></td>
+     <td style="font-size:12px">${esc(x.stage)}</td><td class="mono">${x.in_trade?sgn(x.open_pct,2,"%")+" <span class='muted'>"+sgn(x.open_r,2,"R")+"</span>":""}</td>
+     <td class="mono muted" style="font-size:12px">${x.shadow_trades?sgn(x.shadow_pct,2,"%")+" ("+x.shadow_trades+")":""}</td></tr>`).join(""); }).join("");
+  const syms=[...new Set(tr.map(t=>t.symbol))].sort();
+  const fl=tr.filter(t=>(!oeLF.mode||t.mode===oeLF.mode)&&(!oeLF.sym||t.symbol===oeLF.sym));
+  const sel=(k,list)=>`<select onchange="oeLF.${k}=this.value;oeSel=null;draw()" style="background:#0F141B;color:var(--tx);border:1px solid #2A3340;border-radius:6px;padding:6px;font:inherit;font-size:13px">${list.map(([v,n])=>`<option value="${esc(v)}" ${oeLF[k]===v?"selected":""}>${esc(n)}</option>`).join("")}</select>`;
+  return `<h1>ORB × EMA · NAS100 · US500</h1><div class="muted" style="font-size:12px">Opening-range break and retest at 9:30 NY (${nyLocal(570)} your time), only when the 5M EMA stack and a rising ADX agree · stop behind the 21 EMA · 2R target · first 90 minutes · skips CPI/NFP mornings</div>
+  <div class="row">
+   <section class="card side"><div class="lbl">Live today</div>${liveSu.map(x=>`<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px"><b class="mono">${esc(x.symbol)}</b> <span class="muted">${esc(x.stage)}</span></div>`).join("")}<div class="muted" style="font-size:12px;margin-top:6px">Next session ${esc(st.next_session||"")}${st.news_morning?' · <span class="neg">CPI/NFP morning — skipped</span>':""}${st.account_blocked?' · <span class="neg">account guard blocking</span>':""}</div></section>
+   <section class="card side"><div class="lbl">Open</div>${open.length?open.map(x=>`<div style="margin-top:6px"><b class="mono">${esc(x.symbol)}</b> <span class="muted">${x.trade_mode}</span> ${esc(x.dir)} · ${sgn(x.open_pct,2,"%")}<div class="muted" style="font-size:12px">entry ${esc(x.entry)} · stop ${esc(x.sl)} · target ${esc(x.tp)}</div></div>`).join(""):`<div class="big muted">Flat</div>`}</section>
+   <section class="card side"><div class="lbl">Live closed</div><div class="big">${sgn(live.reduce((a,t)=>a+(+t.pct_gain||0),0),2,"%")}</div><div class="muted" style="margin-top:6px">${live.length} trades · ${live.length?Math.round(100*live.filter(t=>+t.R>0).length/live.length):0}% win · P&L ${sgn(st.cum_pnl,0," $")}</div></section>
+   <section class="card side"><div class="lbl">Shadow closed</div><div class="big" style="color:#7FB2FF">${sgn(sh.reduce((a,t)=>a+(+t.pct_gain||0),0),2,"%")}</div><div class="muted" style="margin-top:6px">${sh.length} trades · ${sh.length?Math.round(100*sh.filter(t=>+t.R>0).length/sh.length):0}% win · at the risk % set per symbol</div></section>
+  </div>
+  ${pctCard(live.map(t=>({pct:t.pct_gain,R:t.R,t:srvDate(t.close_server)})),"Live scorecard · % of account",'NAS100 ≈ +0.16% avg per trade, ~90 trades/yr · US500 ≈ +0.06 to +0.17% · both together ≈ +21% to +28% a year, worst drawdown −12% to −17%')}
+  <section class="card"><h2>Setups · conditions, mode and risk</h2><div class="muted" style="font-size:12px">Filter is read on the last closed 5M candle · mode and risk changes apply from the next trade</div>
+   <div class="scroll" style="margin-top:8px"><table><tr><th>Setup</th><th>Mode</th><th>Risk</th><th>Opening range</th><th>Filter now</th><th>Stage</th><th>Open</th><th>Shadow total</th></tr>${condRows}</table></div></section>
+  ${open.map(x=>`<section class="card"><h2>Open · ${esc(x.symbol)} ${x.range_min}m <span class="muted" style="font-size:12px;font-weight:400">${x.trade_mode}</span></h2>${oeChart({snap:x.snap,dir:x.dir,entry:x.entry,sl:x.sl,tp:x.tp,opened:x.opened,range_high:x.range_high,range_low:x.range_low,break_server:x.break?x.break+":00":"",retest_server:x.retest?x.retest+":00":""},true)}</section>`).join("")}
+  <section class="card"><h2>Shadow results by setup</h2>${Object.keys(shBy).length?`<div class="scroll"><table><tr><th>Setup</th><th>Group</th><th>Trades</th><th>Win %</th><th>Total %</th><th>Avg R</th></tr>${Object.entries(shBy).sort((a,b)=>b[1].p-a[1].p).map(([k,o])=>`<tr><td class="mono">${esc(k)}</td><td class="muted">${o.grp}</td><td class="mono">${o.n}</td><td class="mono">${Math.round(100*o.w/o.n)}%</td><td class="mono">${sgn(o.p,2,"%")}</td><td class="mono">${sgn(o.r/o.n,2,"R")}</td></tr>`).join("")}</table></div>`:`<div class="empty">No shadow trades yet.</div>`}</section>
+  <section class="card"><h2>Trade log <span class="muted" style="font-size:12px;font-weight:400">· live and shadow · tap a trade for its chart</span></h2>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${sel("mode",[["","Live + shadow"],["live","Live"],["shadow","Shadow"]])}${sel("sym",[["","All symbols"],...syms.map(s=>[s,s])])}</div>
+   ${fl.length?`<div class="scroll"><table><tr><th>Opened</th><th>Setup</th><th>Mode</th><th>Dir</th><th>Entry</th><th>Stop</th><th>Target</th><th>Exit</th><th>%</th><th>R</th><th>Why</th></tr>${fl.slice(0,200).map(t=>{ const id=t.snap+t.mode, op=oeSel===id;
+     return `<tr style="cursor:pointer" onclick="oeSel=${op?"null":`'${esc(id)}'`};draw()"><td class="mono muted">${esc(t.open_server)}</td><td class="mono">${esc(t.symbol)} <span class="muted">${esc(t.range_min)}m</span></td><td style="color:${t.mode==="live"?"#F2C94C":"#7FB2FF"}">${esc(t.mode)}</td><td>${esc(t.dir)}</td><td class="mono">${esc(t.entry)}</td><td class="mono">${esc(t.stop)}</td><td class="mono">${esc(t.target)}</td><td class="mono">${esc(t.exit)}</td><td class="mono">${sgn(t.pct_gain,2,"%")}</td><td class="mono">${sgn(t.R,2)}</td><td class="muted">${esc(t.reason)}</td></tr>`+(op?`<tr><td colspan="11" style="padding:10px 4px 16px">${oeChart(t,false)}<div class="muted mono" style="font-size:11px;margin-top:6px">Filter at break: ${esc(t.filter_at_break)} · risk ${esc(t.risk_pct)}%</div></td></tr>`:""); }).join("")}</table></div>`:`<div class="empty">No trades yet. Live: expect ~3–4 a week across NAS100 and US500.</div>`}</section>
+  <section class="card"><h2>Signals</h2>${(g.signals||[]).slice().reverse().slice(0,30).map(x=>`<div class="mono" style="font-size:12px;padding:5px 0;border-top:1px solid var(--line)">${esc(x.time_server)} · <b>${esc(x.symbol)}</b> ${esc(x.range_min)}m <span class="muted">${esc(x.mode)}</span> · ${esc(x.event)}</div>`).join("")||'<div class="empty">No signals yet.</div>'}</section>
+  <section class="card"><h2>Controls</h2><div style="display:flex;flex-wrap:wrap;gap:8px">
+   <button class="btn" onclick="cmd('${st.paused?"RESUME":"PAUSE"}','','OE')">${st.paused?"Resume":"Pause new live trades"}</button>
+   <button class="btn warn" onclick="cmd('CLOSE_ALL','','OE')">Close all ORB × EMA trades</button></div>
+   <label class="tg"><span>Default risk per trade % (resets per-symbol overrides)</span><input type="text" value="${num(st.risk_default)}" onchange="if(confirm('Set every symbol to '+this.value+'% risk?')) cmd('SET','RISK='+this.value,'OE')"></label>
+   ${(g.cmd_results||[]).slice(-6).reverse().map(r=>`<div class="mono muted" style="font-size:12px;padding:3px 0">${esc(r.time_server)} · ${esc(r.command)} ${esc(r.arg)} · ${esc(r.result)}</div>`).join("")}</section>`;
+}
 // ===================== unified trade log (v4) =====================
 let LF={sys:"",mode:"",st:"",sym:"",dir:"",per:"30",n:150}, allSel=null;
 const isLong=d=>/buy|long/i.test(d||"");
@@ -507,6 +572,8 @@ function allTrades(){ const out=[];
   gpPairs().forEach(t=>out.push({sys:"Gap fade",sub:"9:30 gap",mode:"live",sym:t.symbol,long:isLong(t.dir),op:srvDate(t.open_server),cl:srvDate(t.close_server),entry:t.entry,exit:(t.B||t.A||{}).exit,R:t.R,profit:t.profit,why:t.why,id:"gp|"+t.open_server+t.symbol,chart:()=>gpChart(t,false)}));
   ((S.gp||{}).status||{}).positions&&[...new Set(S.gp.status.positions.map(p=>p.symbol))].forEach(sy=>{ const ps=S.gp.status.positions.filter(p=>p.symbol===sy), p=ps[0];
     out.push({sys:"Gap fade",sub:"9:30 gap",mode:"live",sym:sy,long:isLong(p.dir),op:srvDate(p.opened),cl:null,entry:p.entry,exit:"",R:null,profit:ps.reduce((a,q)=>a+(+q.profit||0),0),why:"open",id:"gpo|"+sy,chart:()=>gpChart({symbol:sy,dir:p.dir,entry:p.entry,sl:p.sl,tp:(ps.find(q=>q.leg==="A")||{}).tp,opened:p.opened},true)}); });
+  oeTrades().forEach(t=>out.push({sys:"ORB × EMA",sub:t.symbol+" "+t.range_min+"m",mode:t.mode,sym:t.symbol,long:isLong(t.dir),op:srvDate(t.open_server),cl:srvDate(t.close_server),entry:t.entry,exit:t.exit,R:t.R===""?null:+t.R,profit:t.mode==="live"?t.profit:null,why:t.reason,id:"oe|"+t.snap+t.mode,chart:()=>oeChart(t,false)}));
+  (((S.oe||{}).status||{}).setups||[]).filter(x=>x.in_trade).forEach(x=>out.push({sys:"ORB × EMA",sub:x.symbol+" "+x.range_min+"m",mode:x.trade_mode,sym:x.symbol,long:isLong(x.dir),op:srvDate(x.opened),cl:null,entry:x.entry,exit:"",R:+x.open_r,why:"open",id:"oeo|"+x.snap,chart:()=>oeChart({snap:x.snap,dir:x.dir,entry:x.entry,sl:x.sl,tp:x.tp,opened:x.opened,range_high:x.range_high,range_low:x.range_low},true)}));
   tradeGroups().forEach(t=>out.push({sys:"News & Cover",sub:"Plan "+t.plan,mode:"live",sym:t.sym,long:isLong(t.open.dir),op:t.t,cl:t.exit?srvDate(t.exit.time_server):null,entry:t.open.price,exit:t.exit?t.exit.price:"",R:t.R,why:t.exit?t.why:"open",id:"nc|"+t.tag+"#"+t.sym,nck:t.tag+"#"+t.sym}));
   (S.shadow||[]).forEach(x=>out.push({sys:"News & Cover",sub:"Plan "+x.plan+(x.breakeven&&x.breakeven!=="0"&&!/no/i.test(x.breakeven)?" · BE":"")+(x.role==="PICKED"?"":" · not picked"),mode:"shadow",sym:x.symbol,long:isLong(x.dir),op:srvDate(x.entry_time)||srvDate(x.release),cl:srvDate(x.exit_time),entry:x.entry,exit:"",R:x.result_R===""?null:+x.result_R,why:x.exit_type,id:"ncs|"+x.release+x.symbol+x.plan+x.breakeven+x.role,chart:()=>ncShadowChart(x)}));
   return out.sort((a,b)=>(b.op||0)-(a.op||0)); }
@@ -550,7 +617,7 @@ function buildState(){
     upcoming:Object.values(up).sort((a,b)=>(a.time_server||"").localeCompare(b.time_server||"")),
     schedule:csvRows(fileTxt("NC_schedule.csv")),releases:csvRows(fileTxt("NC_releases.csv")),candidates:csvRows(fileTxt("NC_candidates.csv")),
     trades:csvRows(fileTxt("NC_trades.csv")),shadow:csvRows(fileTxt("NC_shadow.csv")),cmd_results:csvRows(fileTxt("NC_command_results.csv")),
-    live,news:jsonFile("news.json"),sc:eaFiles("SC_"),rs:eaFiles("RS_"),gi:eaFiles("GI_"),gp:eaFiles("GP_"),ag:{...eaFiles("AG_"),events:csvRows(fileTxt("AG_events.csv"))}}; }
+    live,news:jsonFile("news.json"),sc:eaFiles("SC_"),rs:eaFiles("RS_"),gi:eaFiles("GI_"),gp:eaFiles("GP_"),oe:eaFiles("OE_"),ag:{...eaFiles("AG_"),events:csvRows(fileTxt("AG_events.csv"))}}; }
 async function load(){ if(loading) return; loading=true;
   try{ let q=SB.from("term_files").select("name,content,updated_at").order("updated_at",{ascending:true}).limit(1000);
     if(lastSeen) q=q.gt("updated_at",lastSeen);
